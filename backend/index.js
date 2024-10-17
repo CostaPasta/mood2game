@@ -26,7 +26,7 @@ const getGenreID = async (genreName, clientID, accessToken) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: `fields id, name; where name ~ *"${genreName}"*; limit 1;`,
+        data: `fields id, name; where name ~ *"${genreName}"*; limit 50;`,
       });
   
       // If the genre is found, return its ID
@@ -54,20 +54,20 @@ app.get('/games', async (req, res) => {
       }
   
       // Base query for IGDB API
-      let query = 'fields name, genres.name, themes.name, rating, platforms.name; limit 10;';
+      let query = 'fields name, genres.name, themes.name, rating, platforms.name; limit 50;';
   
       // Modify query based on genre ID or mood
       if (genre) {
         query = `
           fields name, genres.name, themes.name, rating, platforms.name;
           where genres = (${genre});
-          limit 10;
+          limit 50;
         `;
       } else if (mood) {
         query = `
           fields name, genres.name, themes.name, rating, platforms.name;
           where themes.name ~ *"${mood}"*;
-          limit 10;
+          limit 50;
         `;
       }
   
@@ -102,13 +102,14 @@ app.get('/genres', async (req, res) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: `fields id, name; limit 50;`, // Fetch up to 50 genre names and IDs
+        data: 'fields id, name; limit 500; offset 0;', // Fetch up to 50 genre names and IDs
       });
   
       res.json(response.data);
+      
     } catch (error) {
-      console.error('Error fetching genres:', error.message, error.stack);
-      res.status(500).json({ error: 'Error fetching genre data' });
+        console.error('Error fetching genres:', error.message, error.stack);
+        res.status(500).json({ error: 'Error fetching genre data' });
     }
 });
   
@@ -125,7 +126,7 @@ app.get('/themes', async (req, res) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: 'fields id, name; limit 50;',
+        data: 'fields id, name; limit 500; offset 0;',
       });
   
       res.json(response.data);

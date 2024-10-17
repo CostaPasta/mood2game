@@ -4,6 +4,12 @@ export default function RootLayout({ children }) {
       <body>
         <header>
           <h1>Game Recommender App</h1>
+          <nav>
+            <a href="/">Home</a> | 
+            <a href="/signup">Sign Up</a> | 
+            <a href="/login">Login</a> | 
+            <a href="/profile">Profile</a>
+          </nav>
         </header>
         <main>{children}</main>
         <footer>
