@@ -35,7 +35,7 @@ const getGenreID = async (genreName, clientID, accessToken) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: `fields id, name; where name ~ *"${genreName}"*; limit 50;`,
+        data: `fields id, name; where name ~ *"${genreName}"*; limit 25;`,
       });
   
       if (response.data.length > 0) {
@@ -54,29 +54,39 @@ app.get('/games', async (req, res) => {
   try {
     const clientID = process.env.CLIENT_ID;
     const accessToken = process.env.ACCESS_TOKEN;
-    const { genre, mood } = req.query;
+    const { genre, mood, platforms, sort } = req.query;
 
     if (!clientID || !accessToken) {
       throw new Error('Missing IGDB API credentials in environment variables');
     }
 
-    let query = `
-      fields name, genres.name, themes.name, total_rating, aggregated_rating, first_release_date, similar_games;
-      limit 50;
-    `;
+    // Base query
+    let query = 'fields name, genres.name, platforms.name, aggregated_rating, total_rating, total_rating_count, first_release_date, themes; limit 50;';
+
+    let conditions = [];
 
     if (genre) {
-      query = `
-        fields name, genres.name, themes.name, total_rating, aggregated_rating, first_release_date, similar_games;
-        where genres = (${genre});
-        limit 50;
-      `;
-    } else if (mood) {
-      query = `
-        fields name, genres.name, themes.name, total_rating, aggregated_rating, first_release_date, similar_games;
-        where themes.name ~ *"${mood}"*;
-        limit 50;
-      `;
+      conditions.push(`genres = (${genre})`);
+    }
+
+    // Filter by platform IDs
+    if (platforms) {
+      const platformIds = platforms.split(',').map(id => id.trim()).join(',');
+      conditions.push(`platforms = (${platformIds})`);
+    }
+
+    if (mood) {
+      conditions.push(`themes.name ~ *"${mood}"*`);
+    }
+
+    // Add conditions to the query
+    if (conditions.length > 0) {
+      query += ` where ${conditions.join(' & ')};`;
+    }
+
+    // Sorting by total_rating if requested
+    if (sort === 'popularity') {
+      query += ' sort total_rating desc;';
     }
 
     const response = await axios({
@@ -89,15 +99,13 @@ app.get('/games', async (req, res) => {
       data: query,
     });
 
-    // Log the response to check if new fields are being fetched
-    console.log('Game Data:', response.data);
-
     res.json(response.data);
   } catch (error) {
     console.error('Error in /games route:', error.message, error.stack);
     res.status(500).json({ error: 'Error fetching game data' });
   }
 });
+
 
 
   
@@ -114,7 +122,7 @@ app.get('/genres', async (req, res) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: 'fields id, name; limit 500; offset 0;',
+        data: 'fields id, name; limit 50; offset 0;',
       });
   
       res.json(response.data);
@@ -137,7 +145,7 @@ app.get('/themes', async (req, res) => {
           'Client-ID': clientID,
           Authorization: `Bearer ${accessToken}`,
         },
-        data: 'fields id, name; limit 500; offset 0;',
+        data: 'fields id, name; limit 50; offset 0;',
       });
   
       res.json(response.data);
@@ -203,7 +211,7 @@ app.post('/user/games/rate', async (req, res) => {
         'Client-ID': clientID,
         Authorization: `Bearer ${accessToken}`,
       },
-      data: `fields name, genres.name, platforms.name, popularity, aggregated_rating, rating, follows, hypes, release_dates; where id = ${gameId};`,
+      data: `fields name, genres.name, platforms.name, aggregated_rating, rating, release_dates; where id = ${gameId};`,
     });    
 
     const game = gameResponse.data[0];

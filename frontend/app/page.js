@@ -3,15 +3,26 @@
 import React, { useState } from 'react';
 import GenreMoodSelector from '../components/GenreMoodSelector';
 import GameList from '../components/GameList';
-import { auth } from './firebaseConfig'; // Ensure you have Firebase Auth initialized
-
+import PlatformFilter from '../components/PlatformFilter'; // Import the platform filter component
+import { auth } from './firebaseConfig'; 
 
 export default function Home() {
   const [games, setGames] = useState([]);
+  const [platforms, setPlatforms] = useState([]); // Add state for selected platforms
 
+  // Fetch games based on mood, genre, and platforms
   const fetchGames = async (type, value) => {
     try {
-      const url = `http://localhost:5001/games?${type}=${value}`;
+      let url = `http://localhost:5001/games?${type}=${value}`;
+      
+      if (platforms.length > 0) {
+        const platformQuery = platforms.join(',');
+        url += `&platforms=${platformQuery}`;
+      }
+  
+      // Add sorting by popularity
+      url += `&sort=popularity`;
+  
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch game data');
@@ -22,10 +33,11 @@ export default function Home() {
       console.error('Error fetching games:', error);
     }
   };
+  
 
   const markAsPlayed = async (gameId) => {
     try {
-      const userId = auth.currentUser.uid; // Get the user's Firebase UID
+      const userId = auth.currentUser.uid;
       const response = await fetch('http://localhost:5001/user/games/played', {
         method: 'POST',
         headers: {
@@ -47,7 +59,7 @@ export default function Home() {
   const rateGame = async (gameId) => {
     const rating = prompt('Rate this game (1-5):');
     try {
-      const userId = auth.currentUser.uid; // Get the user's Firebase UID
+      const userId = auth.currentUser.uid;
       const response = await fetch('http://localhost:5001/user/games/rate', {
         method: 'POST',
         headers: {
@@ -69,6 +81,11 @@ export default function Home() {
   return (
     <div>
       <h1>Welcome to the Game Recommender</h1>
+      
+      {/* Platform Filter Section */}
+      <PlatformFilter onPlatformChange={setPlatforms} /> 
+      
+      {/* Existing Components */}
       <GenreMoodSelector onFilterSelect={fetchGames} />
       <GameList games={games} onMarkPlayed={markAsPlayed} onRateGame={rateGame} />
     </div>
