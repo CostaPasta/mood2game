@@ -49,32 +49,71 @@ const getGenreID = async (genreName, clientID, accessToken) => {
     }
 };
 
-// IGDB Game Data Fetching Route
+
+// Updated sorting logic to prioritize review count
+const sortGames = (games) => {
+  const currentDate = new Date();
+  const maxReviews = Math.max(...games.map(game => game.total_rating_count || 0));
+
+  return games
+    .filter(game => game.total_rating_count > 0) // Only include games with reviews
+    .sort((a, b) => {
+      // Adjust review score to prioritize number of reviews
+      const aReviewWeight = a.total_rating_count / maxReviews; // How much to weight based on number of reviews
+      const bReviewWeight = b.total_rating_count / maxReviews;
+      
+      const aUserScore = (a.total_rating || 0) * (1 + aReviewWeight); // Multiply rating by weighted reviews
+      const bUserScore = (b.total_rating || 0) * (1 + bReviewWeight);
+      
+      // Age of the game in years
+      const aAge = (currentDate - new Date(a.first_release_date * 1000)) / (1000 * 60 * 60 * 24 * 365);
+      const bAge = (currentDate - new Date(b.first_release_date * 1000)) / (1000 * 60 * 60 * 24 * 365);
+
+      // Apply diminishing weight to older games, boost newer ones
+      const aAgeFactor = aAge > 5 ? 0.9 : 1 - (aAge / 20);
+      const bAgeFactor = bAge > 5 ? 0.9 : 1 - (bAge / 20);
+
+      // Final score with age and review factors combined
+      const aFinalScore = aUserScore * aAgeFactor;
+      const bFinalScore = bUserScore * bAgeFactor;
+
+      // Sort by final score
+      return bFinalScore - aFinalScore;
+    });
+};
+
+
+
+
+
+
 app.get('/games', async (req, res) => {
   try {
     const clientID = process.env.CLIENT_ID;
     const accessToken = process.env.ACCESS_TOKEN;
-    const { genre, mood, platforms, sort } = req.query;
+    const { genre, mood, platforms } = req.query;
 
     if (!clientID || !accessToken) {
       throw new Error('Missing IGDB API credentials in environment variables');
     }
 
     // Base query
-    let query = 'fields name, genres.name, platforms.name, aggregated_rating, total_rating, total_rating_count, first_release_date, themes; limit 50;';
+    let query = 'fields name, genres.name, platforms.name, total_rating, total_rating_count, first_release_date; limit 500;';
 
     let conditions = [];
 
+    // Genre filter
     if (genre) {
       conditions.push(`genres = (${genre})`);
     }
 
-    // Filter by platform IDs
+    // Platform filter
     if (platforms) {
       const platformIds = platforms.split(',').map(id => id.trim()).join(',');
       conditions.push(`platforms = (${platformIds})`);
     }
 
+    // Mood filter
     if (mood) {
       conditions.push(`themes.name ~ *"${mood}"*`);
     }
@@ -82,11 +121,6 @@ app.get('/games', async (req, res) => {
     // Add conditions to the query
     if (conditions.length > 0) {
       query += ` where ${conditions.join(' & ')};`;
-    }
-
-    // Sorting by total_rating if requested
-    if (sort === 'popularity') {
-      query += ' sort total_rating desc;';
     }
 
     const response = await axios({
@@ -99,7 +133,71 @@ app.get('/games', async (req, res) => {
       data: query,
     });
 
-    res.json(response.data);
+    const sortedGames = sortGames(response.data);
+    res.json(sortedGames);
+  } catch (error) {
+    console.error('Error in /games route:', error.message, error.stack);
+    res.status(500).json({ error: 'Error fetching game data' });
+  }
+});
+
+
+
+
+
+
+
+
+
+// Custom sorting logic
+app.get('/games', async (req, res) => {
+  try {
+    const clientID = process.env.CLIENT_ID;
+    const accessToken = process.env.ACCESS_TOKEN;
+    const { genre, mood, platforms } = req.query;
+
+    if (!clientID || !accessToken) {
+      throw new Error('Missing IGDB API credentials in environment variables');
+    }
+
+    // Base query
+    let query = 'fields name, genres.name, platforms.name, aggregated_rating, total_rating, total_rating_count, first_release_date, themes; limit 50;';
+
+    let conditions = [];
+
+    // Genre filter
+    if (genre) {
+      conditions.push(`genres = (${genre})`);
+    }
+
+    // Platform filter
+    if (platforms) {
+      const platformIds = platforms.split(',').map(id => id.trim()).join(',');
+      conditions.push(`platforms = (${platformIds})`);
+    }
+
+    // Mood filter
+    if (mood) {
+      conditions.push(`themes.name ~ *"${mood}"*`);
+    }
+
+    // Add conditions to the query
+    if (conditions.length > 0) {
+      query += ` where ${conditions.join(' & ')};`;
+    }
+
+    const response = await axios({
+      url: 'https://api.igdb.com/v4/games',
+      method: 'POST',
+      headers: {
+        'Client-ID': clientID,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      data: query,
+    });
+
+    const sortedGames = sortGames(response.data);
+    res.json(sortedGames);
   } catch (error) {
     console.error('Error in /games route:', error.message, error.stack);
     res.status(500).json({ error: 'Error fetching game data' });
