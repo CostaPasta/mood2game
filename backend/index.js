@@ -144,11 +144,6 @@ app.get('/games', async (req, res) => {
 
 
 
-
-
-
-
-
 // Custom sorting logic
 app.get('/games', async (req, res) => {
   try {
@@ -160,43 +155,57 @@ app.get('/games', async (req, res) => {
       throw new Error('Missing IGDB API credentials in environment variables');
     }
 
-    // Base query
-    let query = 'fields name, genres.name, platforms.name, aggregated_rating, total_rating, total_rating_count, first_release_date, themes; limit 50;';
+    let allGames = [];
+    let hasMoreGames = true;
+    let offset = 0;
 
-    let conditions = [];
+    while (hasMoreGames) {
+      // Base query
+      let query = 'fields name, genres.name, platforms.name, total_rating, total_rating_count, first_release_date; limit 100;';
+      
+      let conditions = [];
+      
+      // Genre filter
+      if (genre) {
+        conditions.push(`genres = (${genre})`);
+      }
 
-    // Genre filter
-    if (genre) {
-      conditions.push(`genres = (${genre})`);
+      // Platform filter
+      if (platforms) {
+        const platformIds = platforms.split(',').map(id => id.trim()).join(',');
+        conditions.push(`platforms = (${platformIds})`);
+      }
+
+      // Mood filter
+      if (mood) {
+        conditions.push(`themes.name ~ *"${mood}"*`);
+      }
+
+      // Add conditions to the query
+      if (conditions.length > 0) {
+        query += ` where ${conditions.join(' & ')};`;
+      }
+
+      // Query with pagination
+      const response = await axios({
+        url: 'https://api.igdb.com/v4/games',
+        method: 'POST',
+        headers: {
+          'Client-ID': clientID,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        data: query + ` offset ${offset};`,
+      });
+
+      if (response.data.length > 0) {
+        allGames = allGames.concat(response.data);
+        offset += 100; // Fetch next set of games
+      } else {
+        hasMoreGames = false; // No more games to fetch
+      }
     }
 
-    // Platform filter
-    if (platforms) {
-      const platformIds = platforms.split(',').map(id => id.trim()).join(',');
-      conditions.push(`platforms = (${platformIds})`);
-    }
-
-    // Mood filter
-    if (mood) {
-      conditions.push(`themes.name ~ *"${mood}"*`);
-    }
-
-    // Add conditions to the query
-    if (conditions.length > 0) {
-      query += ` where ${conditions.join(' & ')};`;
-    }
-
-    const response = await axios({
-      url: 'https://api.igdb.com/v4/games',
-      method: 'POST',
-      headers: {
-        'Client-ID': clientID,
-        Authorization: `Bearer ${accessToken}`,
-      },
-      data: query,
-    });
-
-    const sortedGames = sortGames(response.data);
+    const sortedGames = sortGames(allGames);
     res.json(sortedGames);
   } catch (error) {
     console.error('Error in /games route:', error.message, error.stack);
@@ -333,9 +342,6 @@ app.post('/user/games/rate', async (req, res) => {
     res.status(500).send({ error: 'Error rating game' });
   }
 });
-
-
-
 
 
 
