@@ -144,7 +144,8 @@ app.get('/games', async (req, res) => {
 
 
 
-// Custom sorting logic
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 app.get('/games', async (req, res) => {
   try {
     const clientID = process.env.CLIENT_ID;
@@ -186,7 +187,8 @@ app.get('/games', async (req, res) => {
         query += ` where ${conditions.join(' & ')};`;
       }
 
-      // Query with pagination
+      // Query with pagination and delay
+      await sleep(250); // Ensures 4 requests per second
       const response = await axios({
         url: 'https://api.igdb.com/v4/games',
         method: 'POST',
@@ -212,6 +214,7 @@ app.get('/games', async (req, res) => {
     res.status(500).json({ error: 'Error fetching game data' });
   }
 });
+
 
 
 
