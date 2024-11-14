@@ -2,40 +2,57 @@
 
 import React, { useEffect, useState } from 'react';
 
-const GenreMoodSelector = ({ onFilterSelect }) => {
-  const [filterType, setFilterType] = useState('genre'); // Default to genre
-  const [filterValue, setFilterValue] = useState(''); // Stores the selected genre or mood value
-  const [genres, setGenres] = useState([]); // Holds the list of genres fetched from the backend
+const moodMapping = {
+  Calm: ['Sandbox', 'Educational', 'Kids', 'Open world', 'Drama'],
+  Adventurous: ['Fantasy', 'Action', 'Historical', 'Science fiction'],
+  Social: ['Party', 'Comedy', 'Romance', 'Business'],
+  Competitive: ['Warfare', 'Sports', '4X (explore, expand, exploit, and exterminate)'],
+  Immersive: ['Mystery', 'Thriller', 'Stealth', 'Romance'],
+  Intense: ['Horror', 'Survival'],
+  Casual: ['Non-fiction', 'Open world', 'Sandbox'],
+};
 
-  // Fetch genres from the backend when the component loads
+const GenreMoodSelector = ({ onFilterSelect }) => {
+  const [filterType, setFilterType] = useState('genre');
+  const [filterValue, setFilterValue] = useState('');
+  const [genres, setGenres] = useState([]);
+
+  const [moods, setMoods] = useState(Object.keys(moodMapping)); // Get all mood categories
+  const [selectedMoodThemes, setSelectedMoodThemes] = useState([]);
+
   useEffect(() => {
     const fetchGenres = async () => {
       try {
-        const response = await fetch('http://localhost:5001/genres'); // Fetch genres from the backend
+        const response = await fetch('http://localhost:5001/genres');
         const data = await response.json();
-        setGenres(data); // Store the genres in state
-        setFilterValue(data[0]?.id || ''); // Set default value to the first genre ID
+        setGenres(data);
+        setFilterValue(data[0]?.id || '');
       } catch (error) {
         console.error('Error fetching genres:', error);
       }
     };
-
     fetchGenres();
   }, []);
 
-  // Update the filter type and set the appropriate default value
   const handleTypeChange = (e) => {
     const newType = e.target.value;
     setFilterType(newType);
-    setFilterValue(newType === 'genre' ? genres[0]?.id || '' : 'Horror'); // Set the default value based on type
+    setFilterValue(newType === 'genre' ? genres[0]?.id || '' : 'Calm');
+    if (newType === 'mood') {
+      setSelectedMoodThemes(moodMapping['Calm']);
+    }
   };
 
-  // Update the selected filter value based on user input
+  const handleMoodChange = (e) => {
+    const mood = e.target.value;
+    setFilterValue(mood);
+    setSelectedMoodThemes(moodMapping[mood]);
+  };
+
   const handleValueChange = (e) => {
     setFilterValue(e.target.value);
   };
 
-  // Submit the selected filter type and value
   const handleSubmit = () => {
     if (filterValue) {
       onFilterSelect(filterType, filterValue);
@@ -53,9 +70,9 @@ const GenreMoodSelector = ({ onFilterSelect }) => {
         </select>
       </label>
       <br />
-      <label>
-        Select {filterType === 'genre' ? 'Genre' : 'Mood'}:
-        {filterType === 'genre' ? (
+      {filterType === 'genre' ? (
+        <label>
+          Select Genre:
           <select value={filterValue} onChange={handleValueChange}>
             {genres.map((genre) => (
               <option key={genre.id} value={genre.id}>
@@ -63,15 +80,21 @@ const GenreMoodSelector = ({ onFilterSelect }) => {
               </option>
             ))}
           </select>
-        ) : (
-          <select value={filterValue} onChange={handleValueChange}>
-            <option value="Horror">Horror</option>
-            <option value="Fantasy">Fantasy</option>
-            <option value="Science fiction">Sci-Fi</option>
-            <option value="Thriller">Thriller</option>
+        </label>
+      ) : (
+        <label>
+          Select Mood:
+          <select value={filterValue} onChange={handleMoodChange}>
+            {moods.map((mood) => (
+              <option key={mood} value={mood}>
+                {mood}
+              </option>
+            ))}
           </select>
-        )}
-      </label>
+          <br />
+          <label>Themes: {selectedMoodThemes.join(', ')}</label>
+        </label>
+      )}
       <br />
       <button onClick={handleSubmit}>Find Games</button>
     </div>

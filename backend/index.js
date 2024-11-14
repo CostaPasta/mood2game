@@ -25,6 +25,18 @@ app.get('/', (req, res) => {
   res.send('IGDB Game Recommendation API');
 });
 
+
+const moodMapping = {
+  Calm: ['Sandbox', 'Educational', 'Kids', 'Open world', 'Drama'],
+  Adventurous: ['Fantasy', 'Action', 'Historical', 'Science fiction'],
+  Social: ['Party', 'Comedy', 'Romance', 'Business'],
+  Competitive: ['Warfare', 'Sports', '4X (explore, expand, exploit, and exterminate)'],
+  Immersive: ['Mystery', 'Thriller', 'Stealth', 'Romance'],
+  Intense: ['Horror', 'Survival'],
+  Casual: ['Non-fiction', 'Open world', 'Sandbox'],
+};
+
+
 // Helper function to get the genre ID based on the name
 const getGenreID = async (genreName, clientID, accessToken) => {
     try {
@@ -52,33 +64,67 @@ const getGenreID = async (genreName, clientID, accessToken) => {
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Updated sorting logic to prioritize review count
-const sortGames = (games) => {
+const sortGames = (games, moodThemes = []) => {
   const currentDate = new Date();
   const maxReviews = Math.max(...games.map(game => game.total_rating_count || 0));
 
   return games
-    .filter(game => !game.parent_game && game.total_rating_count > 0) // Exclude expansions and filter games with reviews
-    .sort((a, b) => {
-      const aReviewWeight = a.total_rating_count / maxReviews; 
-      const bReviewWeight = b.total_rating_count / maxReviews;
+    .filter(game => {
+      const hasReviews = game.total_rating_count > 0;
+      const isNotExpansion = !game.parent_game;
+      const matchesMood = moodThemes.length === 0 || (game.themes && game.themes.some(t => moodThemes.includes(t)));
+      return hasReviews && isNotExpansion && matchesMood;
+    })
+    .map(game => {
+      const themeIds = game.themes || [];
+      const moodRelevance = moodThemes.length > 0 
+        ? themeIds.reduce((acc, themeId, index) => {
+            const weight = 1 / Math.pow(2, index);
+            return moodThemes.includes(themeId) ? acc + weight : acc;
+          }, 0)
+        : 0; // Skip mood scoring if no themes match.
 
-      const aUserScore = (a.total_rating || 0) * (1 + aReviewWeight); 
-      const bUserScore = (b.total_rating || 0) * (1 + bReviewWeight);
+      const reviewWeight = game.total_rating_count / maxReviews;
+      const userScore = (game.total_rating || 0) * (1 + reviewWeight);
 
-      // Age of the game in years
-      const aAge = (currentDate - new Date(a.first_release_date * 1000)) / (1000 * 60 * 60 * 24 * 365);
-      const bAge = (currentDate - new Date(b.first_release_date * 1000)) / (1000 * 60 * 60 * 24 * 365);
+      const age = (currentDate - new Date(game.first_release_date * 1000)) / (1000 * 60 * 60 * 24 * 365);
+      const ageFactor = age > 5 ? 0.9 : 1 - (age / 20);
 
-      // Apply diminishing weight to older games, boost newer ones
-      const aAgeFactor = aAge > 5 ? 0.9 : 1 - (aAge / 20);
-      const bAgeFactor = bAge > 5 ? 0.9 : 1 - (bAge / 20);
-
-      const aFinalScore = aUserScore * aAgeFactor;
-      const bFinalScore = bUserScore * bAgeFactor;
-
-      return bFinalScore - aFinalScore;
-    });
+      return {
+        ...game,
+        finalScore: userScore * ageFactor + moodRelevance * 5,
+      };
+    })
+    .sort((a, b) => b.finalScore - a.finalScore);
 };
+
+
+
+const fetchGamesInParallel = async (query) => {
+  const batchSize = 100;
+  const maxGames = 2000; 
+  let allGames = [];
+  let offset = 0;
+
+  while (allGames.length < maxGames) {
+    const [batch1, batch2] = await Promise.all([
+      fetchGames(offset, batchSize, query),
+      fetchGames(offset + batchSize, batchSize, query),
+    ]);
+
+    allGames = allGames.concat(batch1, batch2);
+
+    if (!batch1.length && !batch2.length) break;
+
+    offset += batchSize * 2;
+
+    // Wait to respect the rate limit (4 requests per second)
+    await sleep(250);
+  }
+
+  return allGames;
+};
+
 
 const fetchGames = async (offset, limit = 100, query) => {
   await sleep(250); // Control rate limit of 4 requests per second
@@ -89,7 +135,7 @@ const fetchGames = async (offset, limit = 100, query) => {
       'Client-ID': process.env.CLIENT_ID,
       Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
     },
-    data: `${query} offset ${offset}; limit ${limit};`,
+    data: `${query} offset ${offset}; limit ${limit}; sort total_rating_count desc;`,
   });
   return response.data;
 };
@@ -105,133 +151,42 @@ app.get('/games', async (req, res) => {
     }
 
     let query = 'fields name, genres.name, themes, platforms.name, total_rating, total_rating_count, first_release_date, parent_game;';
-    let conditions = [];
+    const conditions = ['first_release_date > 1136073600'];
 
-    // Add condition for games released after 2006 (Unix timestamp for Jan 1, 2006)
-    conditions.push('first_release_date > 1136073600');
-
-    // Genre filter
-    if (genre) {
-      conditions.push(`genres = (${genre})`);
-    }
-
-    // Platform filter
+    if (genre) conditions.push(`genres = (${genre})`);
     if (platforms) {
-      const platformIds = platforms.split(',').map(id => id.trim()).join(',');
+      const platformIds = platforms.split(',').map((id) => id.trim()).join(',');
       conditions.push(`platforms = (${platformIds})`);
     }
 
-    // Mood filter
-    if (mood) {
-      conditions.push(`themes.name ~ *"${mood}"*`);
+    if (conditions.length) query += ` where ${conditions.join(' & ')};`;
+
+    let allGames = await fetchGamesInParallel(query);
+
+    if (mood && moodMapping[mood]) {
+      const themeResponse = await axios.post(
+        'https://api.igdb.com/v4/themes',
+        `fields id, name; where name = (${moodMapping[mood].map((name) => `"${name}"`).join(',')});`,
+        {
+          headers: {
+            'Client-ID': clientID,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      const moodThemes = themeResponse.data.map((theme) => theme.id);
+      allGames = sortGames(allGames, moodThemes).slice(0, 50);
+    } else {
+      allGames = sortGames(allGames).slice(0, 50);
     }
 
-    // Add conditions to the query
-    if (conditions.length > 0) {
-      query += ` where ${conditions.join(' & ')};`;
-    }
-
-    let allGames = [];
-    let hasMoreGames = true;
-    let offset = 0;
-
-    // Continue fetching games
-    while (hasMoreGames && allGames.length < 500) {
-      const [gamesBatch1, gamesBatch2] = await Promise.all([
-        fetchGames(offset, 100, query),
-        fetchGames(offset + 100, 100, query),
-      ]);
-
-      allGames = allGames.concat(gamesBatch1, gamesBatch2);
-
-      // If no more games are fetched, stop fetching
-      if (gamesBatch1.length === 0 && gamesBatch2.length === 0) {
-        hasMoreGames = false;
-      }
-
-      offset += 200;
-    }
-
-    const sortedGames = sortGames(allGames).slice(0, 50); // Limit to top 50 games after sorting
-    res.json(sortedGames);
-
+    res.json(allGames);
   } catch (error) {
-    console.error('Error in /games route:', error.message, error.stack);
+    console.error('Error in /games route:', error.message);
     res.status(500).json({ error: 'Error fetching game data' });
   }
 });
 
-
-
-
-// app.get('/games', async (req, res) => {
-//   try {
-//     const clientID = process.env.CLIENT_ID;
-//     const accessToken = process.env.ACCESS_TOKEN;
-//     const { genre, mood, platforms } = req.query;
-
-//     if (!clientID || !accessToken) {
-//       throw new Error('Missing IGDB API credentials in environment variables');
-//     }
-
-//     let allGames = [];
-//     let hasMoreGames = true;
-//     let offset = 0;
-
-//     while (hasMoreGames) {
-//       // Base query
-//       let query = 'fields name, genres.name, themes, platforms.name, total_rating, total_rating_count, first_release_date, parent_game; limit 100;';
-      
-//       let conditions = [];
-      
-//       // Genre filter
-//       if (genre) {
-//         conditions.push(`genres = (${genre})`);
-//       }
-
-//       // Platform filter
-//       if (platforms) {
-//         const platformIds = platforms.split(',').map(id => id.trim()).join(',');
-//         conditions.push(`platforms = (${platformIds})`);
-//       }
-
-//       // Mood filter
-//       if (mood) {
-//         conditions.push(`themes.name ~ *"${mood}"*`);
-//       }
-
-//       // Add conditions to the query
-//       if (conditions.length > 0) {
-//         query += ` where ${conditions.join(' & ')};`;
-//       }
-
-//       // Query with pagination and delay
-//       await sleep(250); // Ensures 4 requests per second
-//       const response = await axios({
-//         url: 'https://api.igdb.com/v4/games',
-//         method: 'POST',
-//         headers: {
-//           'Client-ID': clientID,
-//           Authorization: `Bearer ${accessToken}`,
-//         },
-//         data: query + ` offset ${offset};`,
-//       });
-
-//       if (response.data.length > 0) {
-//         allGames = allGames.concat(response.data);
-//         offset += 100; // Fetch next set of games
-//       } else {
-//         hasMoreGames = false; // No more games to fetch
-//       }
-//     }
-
-//     const sortedGames = sortGames(allGames).slice(0, 25); // Limit to top 25 games
-//     res.json(sortedGames);
-//   } catch (error) {
-//     console.error('Error in /games route:', error.message, error.stack);
-//     res.status(500).json({ error: 'Error fetching game data' });
-//   }
-// });
 
 // Route to Fetch Genres
 app.get('/genres', async (req, res) => {
@@ -319,9 +274,94 @@ app.post('/user/games/rate', async (req, res) => {
   }
 });
 
+app.post('/user/games/played', async (req, res) => {
+  const { userId, gameId } = req.body;
+  try {
+    await db.collection('users').doc(userId).collection('playedGames').doc(`${gameId}`).set({
+      gameId,
+      playedAt: new Date(),
+    });
+    res.send({ message: 'Game marked as played successfully' });
+  } catch (error) {
+    console.error('Error marking game as played:', error);
+    res.status(500).send({ error: 'Error marking game as played' });
+  }
+});
+
+
 
 
 // Start server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
+
+
+// app.get('/games', async (req, res) => {
+//   try {
+//     const clientID = process.env.CLIENT_ID;
+//     const accessToken = process.env.ACCESS_TOKEN;
+//     const { genre, mood, platforms } = req.query;
+
+//     if (!clientID || !accessToken) {
+//       throw new Error('Missing IGDB API credentials in environment variables');
+//     }
+
+//     let allGames = [];
+//     let hasMoreGames = true;
+//     let offset = 0;
+
+//     while (hasMoreGames) {
+//       // Base query
+//       let query = 'fields name, genres.name, themes, platforms.name, total_rating, total_rating_count, first_release_date, parent_game; limit 100;';
+      
+//       let conditions = [];
+      
+//       // Genre filter
+//       if (genre) {
+//         conditions.push(`genres = (${genre})`);
+//       }
+
+//       // Platform filter
+//       if (platforms) {
+//         const platformIds = platforms.split(',').map(id => id.trim()).join(',');
+//         conditions.push(`platforms = (${platformIds})`);
+//       }
+
+//       // Mood filter
+//       if (mood) {
+//         conditions.push(`themes.name ~ *"${mood}"*`);
+//       }
+
+//       // Add conditions to the query
+//       if (conditions.length > 0) {
+//         query += ` where ${conditions.join(' & ')};`;
+//       }
+
+//       // Query with pagination and delay
+//       await sleep(250); // Ensures 4 requests per second
+//       const response = await axios({
+//         url: 'https://api.igdb.com/v4/games',
+//         method: 'POST',
+//         headers: {
+//           'Client-ID': clientID,
+//           Authorization: `Bearer ${accessToken}`,
+//         },
+//         data: query + ` offset ${offset};`,
+//       });
+
+//       if (response.data.length > 0) {
+//         allGames = allGames.concat(response.data);
+//         offset += 100; // Fetch next set of games
+//       } else {
+//         hasMoreGames = false; // No more games to fetch
+//       }
+//     }
+
+//     const sortedGames = sortGames(allGames).slice(0, 25); // Limit to top 25 games
+//     res.json(sortedGames);
+//   } catch (error) {
+//     console.error('Error in /games route:', error.message, error.stack);
+//     res.status(500).json({ error: 'Error fetching game data' });
+//   }
+// });
