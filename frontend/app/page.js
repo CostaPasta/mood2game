@@ -14,37 +14,44 @@ export default function Home() {
   // Fetch games with added fields
   const fetchGames = async (type, value) => {
     try {
+      const userId = auth.currentUser?.uid; // Get user ID
       let url = `http://localhost:5001/games?${type}=${value}`;
       
-      if (platforms.length > 0) {
-        const platformQuery = platforms.join(',');
-        url += `&platforms=${platformQuery}`;
-      }
-
-      url += `&sort=popularity`;
-
+      if (userId) url += `&userId=${userId}`;
+      
       const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error('Failed to fetch game data');
-      }
+      if (!response.ok) throw new Error('Failed to fetch games');
+      
       const data = await response.json();
       setGames(data);
     } catch (error) {
       console.error('Error fetching games:', error);
     }
   };
+  
+  
 
-  const markAsPlayed = async (gameId) => {
+  const markAsPlayed = async (id) => {
     try {
       const userId = auth.currentUser.uid;
+  
+      if (!id) {
+        console.error('Invalid id:', id);
+        return;
+      }
+  
       const response = await fetch('http://localhost:5001/user/games/played', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, gameId }),
+        body: JSON.stringify({ userId, gameId: id }), // Map `id` to `gameId`
       });
-
+  
       if (response.ok) {
-        console.log(`Game ${gameId} marked as played`);
+        setGames((prevGames) =>
+          prevGames.map((game) =>
+            game.id === id ? { ...game, played: true } : game
+          )
+        );
       } else {
         console.error('Failed to mark game as played');
       }
@@ -52,19 +59,35 @@ export default function Home() {
       console.error('Error marking game as played:', error);
     }
   };
-
-  const rateGame = async (gameId) => {
+  
+  
+  
+  const rateGame = async (id) => {
     const rating = prompt('Rate this game (1-5):');
+    if (!rating) return; // Exit if no rating is provided
+  
     try {
       const userId = auth.currentUser.uid;
+  
+      if (!id) {
+        console.error('Invalid id:', id);
+        return;
+      }
+  
       const response = await fetch('http://localhost:5001/user/games/rate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, gameId, rating }),
+        body: JSON.stringify({ userId, gameId: id, rating }), // Map `id` to `gameId`
       });
-
+  
       if (response.ok) {
-        console.log(`Game ${gameId} rated with ${rating} stars`);
+        setGames((prevGames) =>
+          prevGames.map((game) =>
+            game.id === id
+              ? { ...game, rated: true, rating: parseInt(rating, 10) }
+              : game
+          )
+        );
       } else {
         console.error('Failed to rate game');
       }
@@ -72,6 +95,11 @@ export default function Home() {
       console.error('Error rating game:', error);
     }
   };
+  
+  
+  
+  
+  
 
   return (
     <div>

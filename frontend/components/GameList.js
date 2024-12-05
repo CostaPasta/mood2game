@@ -3,17 +3,29 @@ import React from 'react';
 const GameList = ({ games, onMarkPlayed, onRateGame }) => {
   return (
     <div>
-      {games.map((game, index) => (
-        <div key={`${game.id}-${index}`} style={{ marginBottom: '20px' }}>
+      {games.map((game) => (
+        <div key={game.id} className="game-item">
           <h3>{game.name}</h3>
-          <p>User Rating: {game.total_rating || 'N/A'} ({game.total_rating_count || 0} reviews)</p>
-          <p>Release Date: {game.first_release_date ? new Date(game.first_release_date * 1000).toLocaleDateString() : 'Unknown'}</p>
-          <button onClick={() => onMarkPlayed(game.id)}>Mark as Played</button>
-          <button onClick={() => onRateGame(game.id)}>Rate Game</button>
+          <p>Genres: {game.genres?.map((genre) => genre.name).join(', ')}</p>
+          <p>Platforms: {game.platforms?.map((platform) => platform.name).join(', ')}</p>
+          <p>
+            {game.played ? '✅ Played' : '❌ Not Played'} | 
+            {game.rated ? `⭐ Rated (${game.rating || 'No Rating'})` : 'Not Rated'}
+          </p>
+          {!game.played && (
+            <button onClick={() => onMarkPlayed(game.id)}>Mark as Played</button>
+          )}
+          {game.played && !game.rated && (
+            <button onClick={() => onRateGame(game.id)}>Rate Game</button>
+          )}
         </div>
       ))}
     </div>
   );
 };
 
+
+
 export default GameList;
+
+
